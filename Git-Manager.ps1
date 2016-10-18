@@ -79,7 +79,7 @@ function GIT-SELF-AWARE ([String]$Folder) {
             $a = git pull "https://github.com/$($Data.GitHub[1]).git" master 2>&1
             if ($a -match "failed|rejected|error") {$a}
             ls "$Rand-Folder" -file | % {cp $_.FullName}
-            ls "$Rand-Folder" -Directory | % {if (!(Test-Path $_.name)) {md $_.name};cp "$($_.FullName)/*" $_.name -f -r}; del -Recurse "$Rand-Folder"
+            ls "$Rand-Folder" -Directory | % {if (!(Test-Path $_.name)) {md $_.name};cp "$($_.FullName)/*" $_.name -force -r}; del -Recurse "$Rand-Folder"
         }
     }
     if (!(Test-Path -type Leaf "LICENSE")) {
