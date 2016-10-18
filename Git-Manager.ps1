@@ -75,7 +75,7 @@ function GIT-SELF-AWARE ([String]$Folder) {
         if (!(Test-Path "LICENSE") -or !(Test-Path "README.md")) {
             Write-AP ">*Issuing a pull request from [$($Data.GitHub[1])]"
             $Rand = Get-Random
-            md "$Rand-Folder" | Out-Null;ls -File | % {mv $_ "$Rand-Folder"}
+            md "$Rand-Folder" | Out-Null;ls | % {mv $_ "$Rand-Folder"}
             $a = git pull "https://github.com/$($Data.GitHub[1]).git" master 2>&1
             if ($a -match "failed|rejected|error") {$a}
             ls "$Rand-Folder" | % {cp $_.FullName}; del -Recurse "$Rand-Folder"
@@ -128,13 +128,13 @@ function GIT-SELF-AWARE ([String]$Folder) {
         if ($stat -match "ahead of") {Write-AP ">>!Seems to have code that has not yet been pushed, will include those commits"}
         $MSG = $Message
         if (!$MSG) {$MSG = Input-Prompt (Tab-Text "Enter a message to commit with : " 2);if (!$MSG.trim()) {$MSG = "Updated Code"}}
-        $out = "|==========Pull==================="
+        $out = "|==========Pull===================`n"
         $out += git pull $Data.GitHub[0] master 2>&1
-        $out += "|==========ADD==================="
+        $out += "|==========ADD===================`n"
         $out += git add . 2>&1
-        $out += "|==========Commit================"
+        $out += "|==========Commit================`n"
         $Out += git commit -a -m $MSG 2>&1
-        $out += "|==========Push=================="
+        $out += "|==========Push==================`n"
         $Out += git push --set-upstream $Data.GitHub[0] master 2>&1
         Write-AP $(if ($Out -notmatch "failed|rejected|conflict") {">+Success, Pushed Code up."} else {$Out})
     } else {if ($Inp) {[Console]::CursorTop--};Clear-Line}
