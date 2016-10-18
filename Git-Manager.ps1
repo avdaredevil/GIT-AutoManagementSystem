@@ -75,7 +75,7 @@ function GIT-SELF-AWARE ([String]$Folder) {
         if (!(Test-Path "LICENSE") -or !(Test-Path "README.md")) {
             Write-AP ">*Issuing a pull request from [$($Data.GitHub[1])]"
             $Rand = Get-Random
-            md "$Rand-Folder" | Out-Null;ls | % {mv $_ "$Rand-Folder"}
+            md "$Rand-Folder" | Out-Null;ls | ? name -ne $Rand-Folder | % {mv $_ "$Rand-Folder"}
             $a = git pull "https://github.com/$($Data.GitHub[1]).git" master 2>&1
             if ($a -match "failed|rejected|error") {$a}
             ls "$Rand-Folder" | % {cp $_.FullName}; del -Recurse "$Rand-Folder"
