@@ -79,7 +79,7 @@ function GIT-SELF-AWARE ([String]$Folder) {
         if (!(Test-Path "LICENSE") -or !(Test-Path "README.md")) {
             Write-AP ">*Issuing a pull request from [$($Data.GitHub[1])]"
             rm -Force -Recurse tt -ea SilentlyContinue
-            $a = git clone $HTTPRepoAddr tt 2>&1
+            $a = git clone $RepoAddr tt 2>&1
             rm .git -re -fo
             ls tt -Force | % {mv $_.FullName . -ea SilentlyContinue}
 
