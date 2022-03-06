@@ -24,6 +24,7 @@ iex ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("
 AP-Require "Internet" {Write-AP "!Need Internet To Function!";exit}
 AP-Require "dep:git" {Write-AP "!Need Git Integrated To Function!";exit}
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Set-Location $PSHell
 $UserName = "avdaredevil@gmail.com"
 $HashFile = "$PSHell\Git-Temp\Current-Versions.map"
 $MapFile  = "$PSHell\Git-Temp\Git-Sources.map"
@@ -157,14 +158,14 @@ function GIT-SELF-AWARE ([String]$Folder) {
     $END.Invoke()
 }
 function Write-Hashes {
-    $Solved = @{};@($Hash.Keys) | % {$Solved.$_ = $False}
+    $Solved = @{}
+    @($Hash.Keys) | % {$Solved.$_ = $False}
     $OLDData = [IO.File]::ReadAllLines($HashFile)
     $OLDData | % {
-        if ($_[0] -ne "@") {
-            $Dt = $_.split("|").trim()
-            $Solved.($Dt[0]) = $True
-            if ($Hash.($Dt[0]) -ne $Dt[1]) {"{0}|{1}" -f $DT[0],$Hash.($Dt[0])} else {$_}
-        } else {$_}
+        if ($_[0] -eq "@") {return $_}
+        $Name,$Hsh = $_.split("|").trim()
+        $Solved.$Name = $True
+        return "{0}|{1}" -f $Name,$Hash.$Name
     } | Out-File -Encoding Default $HashFile
     @($Solved.Keys) | ? {!$Solved.$_} | % {"{0}|{1}" -f $_,$Hash.$_} | Out-File -Encoding Default -Append $HashFile
 }
@@ -177,6 +178,9 @@ function Read-Hashes {
 function Get-Destination ($Entry, $File) {
     return Join-Path $PSHell "Git-Temp" $Entry.Dest $File
 }
+function Get-CachedHashLocation ($Entry, $File) {
+    return "$($Entry.Name)@$($File)"
+}
 function Handle-Change ($Entry, $File) {
     $PKGs.($Entry.Name) = $Entry.Dest
     $CurrentPath = Join-Path $PSHell $File
@@ -185,7 +189,7 @@ function Handle-Change ($Entry, $File) {
 
     Write-AP "+Copying Delta File for [$($Entry.Dest)\$File] -> [$($NewHash.split(':')[0,1,2] -join ':')...$($NewHash.split(':')[-3,-2,-1] -join ':')]"
     AP-Compile $CurrentPath $NewPath
-    $Hash.$c = $NewHash
+    $Hash.(Get-CachedHashLocation $Entry $File) = $NewHash
 }
 Read-Maps
 Read-Hashes
@@ -205,8 +209,9 @@ foreach ($Entry in $Script:Maps) {
         $CurrentPath = Join-Path $PSHell $File
         $NewPath = Join-Path $NewFold $File
         $CurrentHash = Get-FileHash "$CurrentPath" -ea SilentlyContinue
+        $OldHash = $Hash.(Get-CachedHashLocation $Entry $File)
 
-        if (!$Hash.$File) {
+        if (!$OldHash) {
             Write-AP "*Creating Hash Entry for [$File]"
             Handle-Change $Entry $File
             continue
@@ -216,7 +221,7 @@ foreach ($Entry in $Script:Maps) {
             Handle-Change $Entry $File
             continue
         }
-        if ($Hash.$File -ne $CurrentHash) {
+        if ($OldHash -ne $CurrentHash) {
             Write-AP "*Detected hash mismatch [$File]"
             Handle-Change $Entry $File
         }
