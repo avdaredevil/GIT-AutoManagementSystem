@@ -202,7 +202,8 @@ foreach ($Entry in $Script:Maps) {
         mkdir "$PSHell\Git-Temp\$($Entry.Dest)" | Out-Null
     }
     foreach ($FileOrFolder in $Entry.ToCopy) {
-        if (Test-Path -type leaf $FileOrFolder) {continue}
+        if (Test-Path -type leaf $FileOrFolder) {continue} # Don't copy files
+        if (Test-Path -type Container $NewFold) {continue} # Don't copy folders if they already exist
         Copy-Item $FileOrFolder $NewFold -Force -Recurse
     }
     foreach ($File in $Entry.Sources) {
