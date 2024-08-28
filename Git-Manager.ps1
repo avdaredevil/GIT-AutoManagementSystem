@@ -65,7 +65,7 @@ if ($Rebuild -and (Test-Path $HashFile)) {Write-AP "!Rebuilding Git/AP Cache";de
 }
 function QUIT ([int]$Code = 0) {
     if ($Script:psw) {Remove-Variable psw -scope Script}
-    if (AP-Require "function:Load-GitIdentity") {Load-GitIdentity}
+    if (AP-Require "function:Load-GitIdentity") {Load-GitIdentity} # Reset the git identity, again super personal to me, but needed :/
     Restore-LocationStack $script:STACK_BKP
     exit $Code
 }
