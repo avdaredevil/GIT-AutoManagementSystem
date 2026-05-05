@@ -118,6 +118,81 @@ function Compute-Hash ($Path) {(Get-FileHash -Algorithm SHA256 $Path).Hash}
 function Hash-Key ($Entry, $File) {"$($Entry.Name)@$File"}
 function Get-Destination ($Entry, $File) {Join-Path $GitTemp $Entry.Dest $File}
 
+# AP-Compile injects one giant base64 line per published script ? when only
+# that line changes, it dominates the diff visually and the commit-message
+# LLM hyperfocuses on B64 internals instead of the user's hand edit. These
+# two helpers compute a function-level delta from old vs new bundle (AST-
+# parsed, not regex) so AP and the LLM both see "what AP-Console functions
+# actually changed" as a one-liner instead of 33KB of opaque base64.
+function Get-CompilerBundleDelta ([string]$Diff) {
+    # Pattern is compiler-exclusive ? confirmed no user scripts call `B64 "..."` directly.
+    $b64rgx    = '\(B64\s+"([A-Za-z0-9+/=]+)"\)'
+    $headerRgx = '^diff --git a/(.+) b/.+'
+    $perFile = [ordered]@{}; $current = '?'
+    foreach ($line in ($Diff -split "`n")) {
+        if ($line -match $headerRgx) {$current = $Matches[1]; continue}
+        if ($line -match '^---' -or $line -match '^\+\+\+') {continue}
+        if ($line -match $b64rgx) {
+            $b = $Matches[1]
+            if (!$perFile[$current]) {$perFile[$current] = @{}}
+            if ($line.StartsWith('-')) {$perFile[$current].Old = $b}
+            elseif ($line.StartsWith('+')) {$perFile[$current].New = $b}
+        }
+    }
+    if (!$perFile.Count) {return $null}
+    $extractFns = {
+        param($b64)
+        if (!$b64) {return @{}}
+        $src = Convert-FromBase64 $b64
+        $tokens = $null; $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($src, [ref]$tokens, [ref]$errors)
+        $fns = @{}
+        $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $true) | % {
+            $fns[$_.Name] = $_.Extent.Text
+        }
+        return $fns
+    }
+    # Bad decode/parse ? fall back to untouched diff (preserves diagnostic visibility).
+    try {
+        $records = foreach ($file in $perFile.Keys) {
+            $entry = $perFile[$file]
+            $oldFns = & $extractFns $entry.Old
+            $newFns = & $extractFns $entry.New
+            [PSCustomObject]@{
+                File    = $file
+                Added   = @($newFns.Keys | ? {$_ -notin $oldFns.Keys} | sort)
+                Removed = @($oldFns.Keys | ? {$_ -notin $newFns.Keys} | sort)
+                Updated = @($oldFns.Keys | ? {$_ -in $newFns.Keys -and $oldFns[$_] -ne $newFns[$_]} | sort)
+            }
+        }
+    } catch {return $null}
+    $markers = foreach ($r in $records) {
+        $parts = @()
+        if ($r.Added)   {$parts += "added: $($r.Added -join ', ')"}
+        if ($r.Removed) {$parts += "removed: $($r.Removed -join ', ')"}
+        if ($r.Updated) {$parts += "updated: $($r.Updated -join ', ')"}
+        $body = if ($parts) {$parts -join '; '} else {'no function-set changes'}
+        "<AP-Compile dep bundle for $($r.File) (auto-injected, NOT a hand edit ? do not lead the commit message with this): $body>"
+    }
+    $cleanDiff = ($Diff -split "`n" | ? {$_ -notmatch $b64rgx}) -join "`n"
+    return [PSCustomObject]@{
+        Records = @($records)
+        Diff    = ($markers -join "`n") + "`n`n" + $cleanDiff
+    }
+}
+function Show-CompilerBundleDelta ($Records) {
+    Write-APL "*","AP-Compile dep bundle changes:"
+    foreach ($r in $Records) {
+        Write-APL ">!","$($r.File):"
+        if ($r.Added)   {Write-APL ">>+","added: ","#$($r.Added   -join ', ')"}
+        if ($r.Removed) {Write-APL ">>-","removed: ","#$($r.Removed -join ', ')"}
+        if ($r.Updated) {Write-APL ">>*","updated: ","#$($r.Updated -join ', ')"}
+        if (!$r.Added -and !$r.Removed -and !$r.Updated) {
+            Write-APL ">>#","(bundle regenerated, contents identical at the function level)"
+        }
+    }
+}
+
 function Handle-Change ($Entry, $File) {
     $PKGs[$Entry.Name] = $Entry.Dest
     $src = Join-Path $PSHell $File
@@ -261,6 +336,15 @@ Rules:
             # --text forces a textual diff even for files git labels "binary" ? UTF-16 .ps1 files have NUL bytes
             # between ASCII chars, which git's default heuristic flags as binary. They're not.
             $diff = git diff --cached --text | Out-String
+            # Strip the AP-Compile B64 dep-bundle line(s) and surface a function-level
+            # delta to AP. The Show- call runs unconditionally ? even when the LLM is
+            # offline and the suggestion path is skipped, AP still sees what AP-Console
+            # functions changed before the commit-message prompt fires.
+            $bundle = Get-CompilerBundleDelta $diff
+            if ($bundle) {
+                Show-CompilerBundleDelta $bundle.Records
+                $diff = $bundle.Diff
+            }
             # Truncate each diff line to the terminal width (minus the ">#" prefix =
             # 4-space indent + "[#] " sign = 8 chars) so UTF-16 source files or minified
             # lines don't wrap into an unreadable wall.
@@ -288,6 +372,7 @@ Rules:
                 - NO ticket tags (never `[RES-1234]`, `[DES-xxx]`).
                 - NO category prefixes (never `[UX]`, `[BUG]`, `[DOC]` ? those belong on PR titles, not commits).
                 - NO trailing period on the summary line.
+                - A `<AP-Compile dep bundle for <path>: ...>` marker in the diff is auto-injected glue (the AP-Compile inlined-deps block), NOT a hand-edit. Lead the commit message with the hand-edit's intent ? never frame the commit as being about the marker itself. BUT bundle changes are still real changes that affect runtime behaviour, so when any marker shows substantive deltas (any `added`/`removed` entries, or 5+ `updated` entries across all files combined), summarise them as the final bullet in the message ? name specific functions when the list is short, or roll up by file (e.g. "rebundles N helpers across `Foo.ps1` / `Bar.ps1`") when the list is long. When the hand-edit itself is empty or trivially small (e.g. only a comment/version bump), the bundle deltas become the primary subject ? describe what AP-Console functionality landed.
 
                 Format:
                 - Single semantic change ? one-line summary only (<= 72 chars when possible).
